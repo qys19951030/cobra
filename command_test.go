@@ -2600,6 +2600,313 @@ func TestFParseErrWhitelistSiblingCommand(t *testing.T) {
 	checkStringContains(t, output, "unknown flag: --unknown")
 }
 
+func TestTraverseChildrenUnknownFlagStableError(t *testing.T) {
+	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
+	rootCmd.Flags().String("namespace", "", "")
+
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	childCmd.Flags().Bool("bar", false, "")
+	rootCmd.AddCommand(childCmd)
+
+	expected := "unknown flag: --unknown"
+
+	testCases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "unknown at front",
+			args: []string{"--unknown", "--namespace", "foo", "child", "--bar"},
+		},
+		{
+			name: "unknown between parent flags and child",
+			args: []string{"--namespace", "foo", "--unknown", "child", "--bar"},
+		},
+		{
+			name: "unknown between child and its flag",
+			args: []string{"--namespace", "foo", "child", "--unknown", "--bar"},
+		},
+		{
+			name: "unknown at end",
+			args: []string{"--namespace", "foo", "child", "--bar", "--unknown"},
+		},
+		{
+			name: "unknown with equals form for namespace",
+			args: []string{"--unknown", "--namespace=foo", "child", "--bar=true"},
+		},
+		{
+			name: "unknown with equals form for namespace, unknown middle",
+			args: []string{"--namespace=foo", "--unknown", "child", "--bar=true"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			if err == nil {
+				t.Errorf("Expected error containing %q, got nil", expected)
+				return
+			}
+			if !strings.Contains(err.Error(), expected) {
+				t.Errorf("Expected error containing %q, got %q", expected, err.Error())
+			}
+		})
+	}
+}
+
+func TestTraverseChildrenUnknownFlagShortForm(t *testing.T) {
+	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
+	rootCmd.Flags().StringP("namespace", "n", "", "")
+
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	childCmd.Flags().BoolP("bar", "b", false, "")
+	rootCmd.AddCommand(childCmd)
+
+	expected := "unknown flag: --unknown"
+
+	testCases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "unknown at front with short flags",
+			args: []string{"--unknown", "-n", "foo", "child", "-b"},
+		},
+		{
+			name: "unknown middle with short flags",
+			args: []string{"-n", "foo", "--unknown", "child", "-b"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			if err == nil {
+				t.Errorf("Expected error containing %q, got nil", expected)
+				return
+			}
+			if !strings.Contains(err.Error(), expected) {
+				t.Errorf("Expected error containing %q, got %q", expected, err.Error())
+			}
+		})
+	}
+}
+
+func TestTraverseChildrenValidPathNoRegression(t *testing.T) {
+	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
+	rootCmd.Flags().String("namespace", "", "namespace flag")
+	rootCmd.Flags().Bool("verbose", false, "verbose flag")
+
+	var childCalled bool
+	var gotNamespace, gotProfile string
+	var gotBar, gotDebug bool
+
+	childCmd := &Command{
+		Use: "child",
+		Run: func(cmd *Command, args []string) {
+			childCalled = true
+			gotNamespace, _ = cmd.Parent().Flags().GetString("namespace")
+			gotProfile, _ = cmd.Flags().GetString("profile")
+			gotBar, _ = cmd.Flags().GetBool("bar")
+			gotDebug, _ = cmd.Parent().Flags().GetBool("verbose")
+		},
+	}
+	childCmd.Flags().String("profile", "", "profile flag")
+	childCmd.Flags().Bool("bar", false, "bar flag")
+	rootCmd.AddCommand(childCmd)
+
+	testCases := []struct {
+		name        string
+		args        []string
+		wantNs      string
+		wantProfile string
+		wantBar     bool
+		wantDebug   bool
+	}{
+		{
+			name:        "parent string space, child bool space",
+			args:        []string{"--namespace", "foo", "child", "--bar"},
+			wantNs:      "foo",
+			wantBar:     true,
+			wantProfile: "",
+			wantDebug:   false,
+		},
+		{
+			name:        "parent string equals, child string space",
+			args:        []string{"--namespace=bar", "child", "--profile", "dev"},
+			wantNs:      "bar",
+			wantProfile: "dev",
+			wantBar:     false,
+			wantDebug:   false,
+		},
+		{
+			name:        "parent bool, parent string equals, child bool equals",
+			args:        []string{"--verbose", "--namespace=ns1", "child", "--bar=true"},
+			wantNs:      "ns1",
+			wantBar:     true,
+			wantProfile: "",
+			wantDebug:   true,
+		},
+		{
+			name:        "child flags only, parent bool at end",
+			args:        []string{"child", "--profile", "prod", "--bar"},
+			wantNs:      "",
+			wantProfile: "prod",
+			wantBar:     true,
+			wantDebug:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			childCalled = false
+			gotNamespace, gotProfile, gotBar, gotDebug = "", "", false, false
+
+			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if !childCalled {
+				t.Fatal("Child command was not called")
+			}
+			if gotNamespace != tc.wantNs {
+				t.Errorf("Expected namespace %q, got %q", tc.wantNs, gotNamespace)
+			}
+			if gotProfile != tc.wantProfile {
+				t.Errorf("Expected profile %q, got %q", tc.wantProfile, gotProfile)
+			}
+			if gotBar != tc.wantBar {
+				t.Errorf("Expected bar %v, got %v", tc.wantBar, gotBar)
+			}
+			if gotDebug != tc.wantDebug {
+				t.Errorf("Expected verbose %v, got %v", tc.wantDebug, gotDebug)
+			}
+		})
+	}
+}
+
+func TestTraverseChildrenLastChildArgsNotPrematurelyParsed(t *testing.T) {
+	rootCmd := &Command{Use: "root", TraverseChildren: true}
+	rootCmd.Flags().String("str", "", "")
+
+	childCmd := &Command{Use: "child", Run: emptyRun}
+	rootCmd.AddCommand(childCmd)
+
+	c, args, err := rootCmd.Traverse([]string{"child", "--str", "value"})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if c.Name() != childCmd.Name() {
+		t.Errorf("Expected command %q, got %q", childCmd.Name(), c.Name())
+	}
+	if len(args) != 3 || args[0] != "--str" || args[1] != "value" {
+		t.Errorf("Expected args [--str value ...], got %v", args)
+	}
+}
+
+func TestTraverseChildrenFParseErrWhitelist(t *testing.T) {
+	root := &Command{
+		Use:              "root",
+		Run:              emptyRun,
+		TraverseChildren: true,
+		FParseErrWhitelist: FParseErrWhitelist{
+			UnknownFlags: true,
+		},
+	}
+	root.Flags().String("namespace", "", "")
+
+	child := &Command{
+		Use: "child",
+		Run: emptyRun,
+		FParseErrWhitelist: FParseErrWhitelist{
+			UnknownFlags: true,
+		},
+	}
+	child.Flags().Bool("bar", false, "")
+	root.AddCommand(child)
+
+	testCases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "parent unknown flag whitelisted at front",
+			args: []string{"--unknown", "--namespace", "foo", "child", "--bar"},
+		},
+		{
+			name: "parent unknown flag whitelisted middle",
+			args: []string{"--namespace", "foo", "--unknown", "child", "--bar"},
+		},
+		{
+			name: "child unknown flag whitelisted",
+			args: []string{"--namespace", "foo", "child", "--unknown", "--bar"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := executeCommand(root, append([]string{"root"}, tc.args...)...)
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestTraverseChildrenNoOptDefValFlags(t *testing.T) {
+	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
+	var gotLogLevel string
+	rootCmd.Flags().String("loglevel", "info", "").NoOptDefVal = "debug"
+	rootCmd.Flags().Lookup("loglevel").NoOptDefVal = "debug"
+
+	var gotBar bool
+	childCmd := &Command{
+		Use: "child",
+		Run: func(cmd *Command, args []string) {
+			gotLogLevel, _ = cmd.Parent().Flags().GetString("loglevel")
+			gotBar, _ = cmd.Flags().GetBool("bar")
+		},
+	}
+	childCmd.Flags().Bool("bar", false, "")
+	rootCmd.AddCommand(childCmd)
+
+	testCases := []struct {
+		name         string
+		args         []string
+		wantLogLevel string
+		wantBar      bool
+	}{
+		{
+			name:         "no-opt-def flag without value followed by subcommand",
+			args:         []string{"--loglevel", "child", "--bar"},
+			wantLogLevel: "debug",
+			wantBar:      true,
+		},
+		{
+			name:         "no-opt-def flag with value followed by subcommand",
+			args:         []string{"--loglevel=warn", "child", "--bar"},
+			wantLogLevel: "warn",
+			wantBar:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotLogLevel, gotBar = "", false
+			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if gotLogLevel != tc.wantLogLevel {
+				t.Errorf("Expected loglevel %q, got %q", tc.wantLogLevel, gotLogLevel)
+			}
+			if gotBar != tc.wantBar {
+				t.Errorf("Expected bar %v, got %v", tc.wantBar, gotBar)
+			}
+		})
+	}
+}
+
 func TestSetContext(t *testing.T) {
 	type key struct{}
 	val := "foobar"

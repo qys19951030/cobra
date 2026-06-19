@@ -671,6 +671,26 @@ func shortHasNoOptDefVal(name string, fs *flag.FlagSet) bool {
 	return flag.NoOptDefVal != ""
 }
 
+func flagNeedsValue(name string, fs *flag.FlagSet) bool {
+	flag := fs.Lookup(name)
+	if flag == nil {
+		return false
+	}
+	return flag.NoOptDefVal == ""
+}
+
+func shortFlagNeedsValue(name string, fs *flag.FlagSet) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	flag := fs.ShorthandLookup(name[:1])
+	if flag == nil {
+		return false
+	}
+	return flag.NoOptDefVal == ""
+}
+
 func stripFlags(args []string, c *Command) []string {
 	if len(args) == 0 {
 		return args
@@ -688,11 +708,11 @@ Loop:
 		case s == "--":
 			// "--" terminates the flags
 			break Loop
-		case strings.HasPrefix(s, "--") && !strings.Contains(s, "=") && !hasNoOptDefVal(s[2:], flags):
+		case strings.HasPrefix(s, "--") && !strings.Contains(s, "=") && flagNeedsValue(s[2:], flags):
 			// If '--flag arg' then
 			// delete arg from args.
 			fallthrough // (do the same as below)
-		case strings.HasPrefix(s, "-") && !strings.Contains(s, "=") && len(s) == 2 && !shortHasNoOptDefVal(s[1:], flags):
+		case strings.HasPrefix(s, "-") && !strings.Contains(s, "=") && len(s) == 2 && shortFlagNeedsValue(s[1:], flags):
 			// If '-f arg' then
 			// delete 'arg' from args or break the loop if len(args) <= 1.
 			if len(args) <= 1 {
@@ -726,9 +746,9 @@ Loop:
 		case s == "--":
 			// -- means we have reached the end of the parseable args. Break out of the loop now.
 			break Loop
-		case strings.HasPrefix(s, "--") && !strings.Contains(s, "=") && !hasNoOptDefVal(s[2:], flags):
+		case strings.HasPrefix(s, "--") && !strings.Contains(s, "=") && flagNeedsValue(s[2:], flags):
 			fallthrough
-		case strings.HasPrefix(s, "-") && !strings.Contains(s, "=") && len(s) == 2 && !shortHasNoOptDefVal(s[1:], flags):
+		case strings.HasPrefix(s, "-") && !strings.Contains(s, "=") && len(s) == 2 && shortFlagNeedsValue(s[1:], flags):
 			// This is a flag without a default value, and an equal sign is not used. Increment pos in order to skip
 			// over the next arg, because that is the value of this flag.
 			pos++
@@ -826,12 +846,11 @@ func (c *Command) Traverse(args []string) (*Command, []string, error) {
 		switch {
 		// A long flag with a space separated value
 		case strings.HasPrefix(arg, "--") && !strings.Contains(arg, "="):
-			// TODO: this isn't quite right, we should really check ahead for 'true' or 'false'
-			inFlag = !hasNoOptDefVal(arg[2:], c.Flags())
+			inFlag = flagNeedsValue(arg[2:], c.Flags())
 			flags = append(flags, arg)
 			continue
 		// A short flag with a space separated value
-		case strings.HasPrefix(arg, "-") && !strings.Contains(arg, "=") && len(arg) == 2 && !shortHasNoOptDefVal(arg[1:], c.Flags()):
+		case strings.HasPrefix(arg, "-") && !strings.Contains(arg, "=") && len(arg) == 2 && shortFlagNeedsValue(arg[1:], c.Flags()):
 			inFlag = true
 			flags = append(flags, arg)
 			continue
