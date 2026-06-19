@@ -2642,7 +2642,7 @@ func TestTraverseChildrenUnknownFlagStableError(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			_, err := executeCommand(rootCmd, tc.args...)
 			if err == nil {
 				t.Errorf("Expected error containing %q, got nil", expected)
 				return
@@ -2680,7 +2680,7 @@ func TestTraverseChildrenUnknownFlagShortForm(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			_, err := executeCommand(rootCmd, tc.args...)
 			if err == nil {
 				t.Errorf("Expected error containing %q, got nil", expected)
 				return
@@ -2762,7 +2762,7 @@ func TestTraverseChildrenValidPathNoRegression(t *testing.T) {
 			childCalled = false
 			gotNamespace, gotProfile, gotBar, gotDebug = "", "", false, false
 
-			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			_, err := executeCommand(rootCmd, tc.args...)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -2845,7 +2845,7 @@ func TestTraverseChildrenFParseErrWhitelist(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := executeCommand(root, append([]string{"root"}, tc.args...)...)
+			_, err := executeCommand(root, tc.args...)
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 			}
@@ -2856,7 +2856,7 @@ func TestTraverseChildrenFParseErrWhitelist(t *testing.T) {
 func TestTraverseChildrenNoOptDefValFlags(t *testing.T) {
 	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
 	var gotLogLevel string
-	rootCmd.Flags().String("loglevel", "info", "").NoOptDefVal = "debug"
+	rootCmd.Flags().String("loglevel", "info", "")
 	rootCmd.Flags().Lookup("loglevel").NoOptDefVal = "debug"
 
 	var gotBar bool
@@ -2893,7 +2893,7 @@ func TestTraverseChildrenNoOptDefValFlags(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			gotLogLevel, gotBar = "", false
-			_, err := executeCommand(rootCmd, append([]string{"root"}, tc.args...)...)
+			_, err := executeCommand(rootCmd, tc.args...)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
