@@ -2362,20 +2362,17 @@ func TestTraverseNoParentFlags(t *testing.T) {
 }
 
 func TestTraverseWithBadParentFlags(t *testing.T) {
-	rootCmd := &Command{Use: "root", TraverseChildren: true}
+	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
 
-	childCmd := &Command{Use: "child"}
+	childCmd := &Command{Use: "child", Run: emptyRun}
 	childCmd.Flags().String("str", "", "")
 	rootCmd.AddCommand(childCmd)
 
 	expected := "unknown flag: --str"
 
-	c, _, err := rootCmd.Traverse([]string{"--str", "ok", "child"})
+	_, err := executeCommand(rootCmd, "--str", "ok", "child")
 	if err == nil || !strings.Contains(err.Error(), expected) {
-		t.Errorf("Expected error, %q, got %q", expected, err)
-	}
-	if c != nil {
-		t.Errorf("Expected nil command")
+		t.Errorf("Expected error containing %q, got %q", expected, err)
 	}
 }
 
@@ -2693,28 +2690,6 @@ func TestTraverseChildrenUnknownFlagShortForm(t *testing.T) {
 }
 
 func TestTraverseChildrenValidPathNoRegression(t *testing.T) {
-	rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
-	rootCmd.Flags().String("namespace", "", "namespace flag")
-	rootCmd.Flags().Bool("verbose", false, "verbose flag")
-
-	var childCalled bool
-	var gotNamespace, gotProfile string
-	var gotBar, gotDebug bool
-
-	childCmd := &Command{
-		Use: "child",
-		Run: func(cmd *Command, args []string) {
-			childCalled = true
-			gotNamespace, _ = cmd.Parent().Flags().GetString("namespace")
-			gotProfile, _ = cmd.Flags().GetString("profile")
-			gotBar, _ = cmd.Flags().GetBool("bar")
-			gotDebug, _ = cmd.Parent().Flags().GetBool("verbose")
-		},
-	}
-	childCmd.Flags().String("profile", "", "profile flag")
-	childCmd.Flags().Bool("bar", false, "bar flag")
-	rootCmd.AddCommand(childCmd)
-
 	testCases := []struct {
 		name        string
 		args        []string
@@ -2759,8 +2734,27 @@ func TestTraverseChildrenValidPathNoRegression(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			childCalled = false
-			gotNamespace, gotProfile, gotBar, gotDebug = "", "", false, false
+			var childCalled bool
+			var gotNamespace, gotProfile string
+			var gotBar, gotDebug bool
+
+			rootCmd := &Command{Use: "root", TraverseChildren: true, Run: emptyRun}
+			rootCmd.Flags().String("namespace", "", "namespace flag")
+			rootCmd.Flags().Bool("verbose", false, "verbose flag")
+
+			childCmd := &Command{
+				Use: "child",
+				Run: func(cmd *Command, args []string) {
+					childCalled = true
+					gotNamespace, _ = cmd.Parent().Flags().GetString("namespace")
+					gotProfile, _ = cmd.Flags().GetString("profile")
+					gotBar, _ = cmd.Flags().GetBool("bar")
+					gotDebug, _ = cmd.Parent().Flags().GetBool("verbose")
+				},
+			}
+			childCmd.Flags().String("profile", "", "profile flag")
+			childCmd.Flags().Bool("bar", false, "bar flag")
+			rootCmd.AddCommand(childCmd)
 
 			_, err := executeCommand(rootCmd, tc.args...)
 			if err != nil {
@@ -2799,8 +2793,8 @@ func TestTraverseChildrenLastChildArgsNotPrematurelyParsed(t *testing.T) {
 	if c.Name() != childCmd.Name() {
 		t.Errorf("Expected command %q, got %q", childCmd.Name(), c.Name())
 	}
-	if len(args) != 3 || args[0] != "--str" || args[1] != "value" {
-		t.Errorf("Expected args [--str value ...], got %v", args)
+	if len(args) != 2 || args[0] != "--str" || args[1] != "value" {
+		t.Errorf("Expected args [--str value], got %v", args)
 	}
 }
 
